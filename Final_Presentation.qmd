@@ -1,0 +1,495 @@
+---
+title: "Better Understanding Goal Scoring in Soccer Matches"
+author: "Matthew Morgan"
+format: 
+  beamer: 
+    institute: Brigham Young University
+    titlegraphic: BYU_monogram.png
+    theme: Frankfurt
+    fonttheme: structurebold
+header-includes: 
+- \definecolor{BYUnavy}{RGB}{0,46,93}
+- \setbeamercolor{structure}{fg=BYUnavy}
+- \setlength{\parskip}{1em}
+- \renewcommand{\baselinestretch}{1.15}
+- \usepackage{booktabs}
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE)
+
+options(knitr.kable.NA = '')
+
+library(brms)
+library(DHARMa)
+library(ggeffects)
+library(knitr)
+library(kableExtra)
+library(lme4)
+library(patchwork)
+library(tidyverse)
+library(worldfootballR)
+
+load("~/Documents/Stat 637/TeamMatchShooting.RData")
+```
+
+# Problem Statement and Understanding
+
+## Analysis Goals
+
+1.  Find shot-specific variables that can help better explain the number of goals scored in a match
+2.  To fit a model that is able to account for the team-specific variation in goal scoring after accounting for the shot-specific variables that have been identified as being able to better explain the number of goals scored in a match.
+
+------------------------------------------------------------------------
+
+## Data Set
+
+-   Obtained from FBref.com
+-   2019-2022 Big 5 European Leagues (Premier League, Bundesliga, La Liga, Serie A, Ligue 1)
+    -   10,754 entries of match shooting statistics
+    -   120 teams
+
+------------------------------------------------------------------------
+
+## Exploratory Data Analysis (EDA)
+
+```{r}
+big5_SoT_plot <- ggplot(big5_team_match_shooting2, aes(x = SoT_Standard, y = Gls_Standard)) +
+  geom_point() +
+  theme_minimal() +
+  labs(
+    title = "Shots on Target vs Goals (Standard)",
+    caption = "Figure 1",
+    x = "Shots on Target",
+    y = "Standard Goals",
+  )
+```
+
+```{r}
+big5_npxG_plot <- ggplot(big5_team_match_shooting2, aes(x = npxG_Expected, y = Gls_Standard)) +
+  geom_point() +
+  theme_minimal() +
+  labs(
+    title = "xG (Non-Penalty) vs Goals (Standard)",
+    caption = "Figure 2",
+    x = "xG (Non-Penalty)",
+    y = "Goals (Standard)"
+  )
+```
+
+```{r}
+big5_SoT_plot + big5_npxG_plot
+```
+
+------------------------------------------------------------------------
+
+# Proposed Model
+
+```{r}
+big5_glmm <- glmer(
+  Gls_Standard ~ SoT_Standard + npxG_Expected + (1|Team), 
+  data = big5_team_match_shooting2, 
+  family = poisson
+)
+```
+
+## Poisson Generalized Linear Mixed Model (GLMM) Specification
+
+$$
+y_i \sim \text{Poisson}(\lambda_i) 
+$$
+$$
+\log(\lambda_i) = \eta_i
+$$
+$$
+\eta_i = (\beta_0 + T_{0t}) + \beta_1x_{i1} + \beta_2x_{i2} + \epsilon_{ti}
+$$
+-   $y_i$: number of standard goals scored in the $i^{\text{th}}$ match  
+-   $x_{i1}$: number of shots on target in the $i^{\text{th}}$ match  
+-   $x_{i2}$: non-penalty expected goals generated in the $i^{\text{th}}$ match
+
+------------------------------------------------------------------------
+
+## Parameter Interpretation
+
+-   $\beta_0$: the log mean number of standard goals in a match where there were 0 shots on target and 0 non-penalty expected goals generated in a match is expected to be $\beta_0$ on average
+-   $\beta_1$: holding all else constant, the log mean number of standard goals in a match is expected to change by $\beta_1$ as the number of shots on target taken in a match increases by 1 on average
+-   $\beta_2$: holding all else constant, the log mean number of standard goals in a match is expected to change by $\beta_2$ as the amount of non-penalty expected goals generated in a match increases by 1 on average
+-   $T_{0t}$: random team intercept effect fot the $t^{\text{th}}$ team which represents a variation from the overall intercept ($\beta_0$), it allows the model's estimates of standard goals scored in a match to vary by team
+
+------------------------------------------------------------------------
+
+## Model Justification - Fixed Effects Testing
+
+```{r}
+big5_null_glm <- glm(
+  Gls_Standard ~ 1, 
+  data = big5_team_match_shooting2, 
+  family = poisson
+)
+
+big5_SoT_glm <- glm(
+  Gls_Standard ~ SoT_Standard, 
+  data = big5_team_match_shooting2, 
+  family = poisson
+)
+
+big5_npxG_glm <- glm(
+  Gls_Standard ~ npxG_Expected, 
+  data = big5_team_match_shooting2, 
+  family = poisson
+)
+
+big5_SoT_npxG_glm <- glm(
+  Gls_Standard ~ SoT_Standard + npxG_Expected, 
+  data = big5_team_match_shooting2, 
+  family = poisson
+)  
+
+big5_SoT_npxG_int_glm <- glm(
+  Gls_Standard ~ SoT_Standard*npxG_Expected,
+  data = big5_team_match_shooting2,
+  family = poisson
+)
+```
+
+```{r}
+big5_fixed <- cbind(
+  c("Null", "npxG", "SoT", "npxG + SoT", "npxG*SoT"),
+  anova(big5_null_glm, big5_npxG_glm, big5_SoT_glm, big5_SoT_npxG_glm, big5_SoT_npxG_int_glm), 
+  c(AIC(big5_null_glm), AIC(big5_npxG_glm), AIC(big5_SoT_glm), AIC(big5_SoT_npxG_glm), AIC(big5_SoT_npxG_int_glm))
+) %>% 
+  data.frame() %>% 
+  select(-2)
+```
+
+```{r}
+kable(
+  big5_fixed, 
+  digits = 1, 
+  caption = "Fixed Effects Testing",
+  booktabs = TRUE, 
+  format = "latex",
+  escape = FALSE,
+  align = c("l", rep("c", 4)), 
+  col.names = c("Model", "Resid. Dev.", "Df", "$\\Delta$D", "AIC")
+) %>% 
+  kable_styling(latex_options = "HOLD_position", font_size = 9) # %>% 
+  # add_footnote("2019-2022 Big 5 European Leagues", notation = "none")
+```
+
+------------------------------------------------------------------------
+
+## Model Justification - Random Effects Testing
+
+```{r}
+big5_random <- cbind(
+  c("GLM", "GLMM"),
+  anova(big5_glmm, big5_SoT_npxG_glm)
+)
+
+rownames(big5_random) <- NULL
+```
+
+```{r}
+kable(
+  big5_random, 
+  digits = 1, 
+  caption = "Random Effects Testing",
+  booktabs = TRUE, 
+  format = "latex",
+  escape = FALSE,
+  align = c("l", rep("c", 8)), 
+  col.names = c("Model", "npar", "AIC", "BIC", "logLik", "deviance", "Chisq", "Df", "Pr(>Chisq)")
+) %>% 
+  kable_styling(font_size = 7) # %>% 
+  # add_footnote("2019-2022 Big 5 Eurpoean Leagues", notation = "none")
+```
+
+------------------------------------------------------------------------
+
+## Model Justification - Overdispersion Testing
+
+```{r}
+overdisp_fun <- function(model) {
+  rdf <- df.residual(model)
+  rp <- residuals(model, type = "pearson")
+  Pearson.chisq <- sum(rp^2)
+  prat <- Pearson.chisq / rdf
+  pval <- pchisq(Pearson.chisq, df = rdf, lower.tail = FALSE)
+  c(chisq = Pearson.chisq, ratio = prat, rdf = rdf, p = pval)
+}
+```
+
+```{r}
+t(round(overdisp_fun(big5_glmm), 3)) %>% 
+  kable(
+    ., 
+    caption = "Overdispersion Testing",
+    booktabs = TRUE, 
+    format = "latex",
+    escape = FALSE,
+    align = "c", 
+    col.names = c("$\\chi^2$ Test Statistic", "Ratio", "Resid. Df", "p-value")
+  ) %>% 
+  kable_styling(latex_options = "HOLD_position", font_size = 9)
+```
+
+\phantom{some text}    
+-   $H_0: \phi = 1$  
+-   $H_1: \phi > 1$  
+-   For a GLMM, the usual procedure of calculating the sum of squared Pearson residuals and comparing it to the residual degrees of freedom gives an approximate estimate of an overdispersion parameter
+
+------------------------------------------------------------------------
+
+## `DHARMa` Package
+
+Simulates scaled residuals that should asymptotically follow a standard uniform distribution, Uniform(0,1), for a correctly specified model in the following way:  
+-   Simulate new response data from the fitted model for each observation  
+-   For each observation, calculate the empirical cumulative density function for the simulated observations, which describes the possible values (and their probability) at the predictor combination of the observed value, assuming the fitted model is correct  
+-   The residual is then defined as the value of the empirical density function at the value of the observed data, so a residual of 0 means that all simulated values are larger than the observed value, and a residual of 0.5 means half of the simulated values are larger than the observed value
+
+------------------------------------------------------------------------
+
+## Model Justification - Residuals
+
+```{r}
+big5_glmm_simres <- simulateResiduals(big5_glmm)
+# The function creates scaled residuals by simulating from the fitted model. 
+```
+
+```{r}
+# Normal Q-Q
+big5_norm_qq <- ggplot() + 
+  geom_qq(aes(sample = residuals(big5_glmm_simres, quantileFunction = qnorm, outlierValues = c(-7,7)))) + 
+  geom_qq_line(aes(sample = residuals(big5_glmm_simres, quantileFunction = qnorm, outlierValues = c(-7,7))), lty = 3) + 
+  theme_minimal() +
+  labs(
+    title = 'Normal Q-Q Plot',
+    caption = "Figure 3",
+    x = 'Theoretical Quantities',
+    y = 'DHARMa Residuals'
+  )
+```
+
+```{r}
+# Residuals vs Fitted
+big5_resid_fit <- ggplot() +
+  geom_point(
+    aes(
+      x = predict(big5_glmm, type = 'response'), 
+      y = residuals(big5_glmm_simres, quantileFunction = qnorm, outlierValues = c(-7,7))
+    )
+  ) +
+  geom_smooth(
+    aes(
+      x = predict(big5_glmm, type = 'response'), 
+      y = residuals(big5_glmm_simres, quantileFunction = qnorm, outlierValues = c(-7,7))
+    ), 
+    method = 'loess', 
+    formula = 'y ~ x',
+    se = FALSE, 
+    color = 'red'
+  ) +
+  geom_hline(yintercept = 0, lty = 3) +
+  theme_minimal() +
+  labs(
+    title = 'Residuals vs Fitted Values',
+    caption = "Figure 4",
+    x = 'Fitted Values',
+    y = 'DHARMa Residuals'
+  )
+```
+
+```{r}
+big5_norm_qq + big5_resid_fit
+```
+
+------------------------------------------------------------------------
+
+# Results
+
+## Fixed Effects Estimates
+
+```{r}
+t(round(fixef(big5_glmm), 3)) %>% 
+  data.frame() %>% 
+  kable(
+    ., 
+    caption = "Fixed Effects Estimates",
+    booktabs = TRUE, 
+    format = "latex",
+    escape = FALSE,
+    align = c("l", rep("c", 3)), 
+    col.names = c("Intercept", "SoT", "npxG")
+  ) %>% 
+  kable_styling(latex_options = "HOLD_position", font_size = 9)
+```
+
+------------------------------------------------------------------------
+
+## Marginal Effects Plots
+
+```{r}
+f5 <- plot(ggpredict(big5_glmm, terms = "SoT_Standard")) +
+  theme(legend.position = "bottom") +
+  labs(
+    title = "Predicted counts of Goals (Standard)",
+    caption = "Figure 5",
+    x = "Shots on Target",
+    y = "Goals (Standard)"
+  )
+```
+
+```{r}
+f6 <- plot(ggpredict(big5_glmm, terms = "npxG_Expected")) +
+  theme(legend.position = "bottom") +
+  labs(
+    title = "Predicted counts of Goals (Standard)",
+    caption = "Figure 6",
+    x = "xG (Non-Penalty)",
+    y = "Goals (Standard)"
+  )
+```
+
+```{r}
+f5 + f6 +
+  plot_annotation(title = "Fixed Effects")
+```
+
+------------------------------------------------------------------------
+
+## Random Effect Estimates
+
+```{r}
+big5_ranef <- ranef(big5_glmm)$Team %>% 
+  data.frame() %>% 
+  rownames_to_column(., "Team") 
+
+t5 <- big5_ranef[order(big5_ranef$X.Intercept., decreasing = TRUE)[1:5],] %>% 
+  kable(
+    digits = 3,
+    row.names = FALSE,
+    booktabs = TRUE, 
+    format = "latex",
+    escape = FALSE,
+    align = c("l", "c"),
+    col.names = c("Team", "Intercept")
+  ) %>% 
+  kable_styling(latex_options = "HOLD_position", font_size = 9) # %>% 
+  # add_footnote("2019-2022 Big 5 European Leagues", notation = "none")
+  
+t6 <- big5_ranef[order(big5_ranef$X.Intercept.)[1:5],] %>% 
+  kable(
+    digits = 3,
+    row.names = FALSE,
+    booktabs = TRUE, 
+    format = "latex",
+    escape = FALSE,
+    align = c("l", "c"),
+    col.names = c("Team", "Intercept")
+  ) %>% 
+  kable_styling(latex_options = "HOLD_position", font_size = 9) # %>% 
+  # add_footnote("2019-2022 Big 5 European Leagues", notation = "none")
+```
+
+```{r, echo = FALSE, results = 'asis'}
+cat("\n")
+cat("\\begin{table}[!htb]")
+cat(c("\\begin{minipage}{.5\\linewidth}
+       \\caption{Five Highest Random Team Intercepts}
+       \\centering",
+         t5,
+     "\\end{minipage}%
+     \\begin{minipage}{.5\\linewidth}
+       \\centering
+         \\caption{Five Lowest Random Team Intercepts}",
+         t6,
+     "\\end{minipage}") )
+cat("\\end{table}")
+```
+
+------------------------------------------------------------------------
+
+## Random Effect Plots
+
+```{r}
+f7 <- plot(
+  ggpredict(
+    big5_glmm, 
+    terms = c("SoT_Standard", "Team [Dortmund, Lazio, Monaco, Atletico Madrid, Manchester City, Brighton and Hove Albion, Sheffield United, Burnley, Arminia, Norwich City]"), 
+    type = "random"
+  ), 
+  ci = FALSE
+) +
+  scale_color_manual(
+    values = c("#FDE100", "#87D8F7", "#E51B22", "#CB3524", "#6CABDD", "#0057B8", "#EE2737", "#6C1D45", "#004E95", "#00A650"),
+    labels = c('Dortmund', 'Lazio', 'Monaco', 'Atl. Madrid', 'Man City', 'Brighton', 'Sheffield Utd', 'Burnley', 'Arminia', 'Norwich')
+  ) +
+  theme(
+    legend.title = element_blank(),
+    legend.text = element_text(size = 6),
+    legend.position = "bottom"
+  ) +
+  labs(
+    title = "Predicted counts of Goals (Standard)",
+    caption = "Figure 7",
+    x = "Shots on Target",
+    y = "Goals (Standard)"
+  )
+```
+
+```{r}
+f8 <- plot(
+  ggpredict(
+    big5_glmm, 
+    terms = c("npxG_Expected", "Team [Dortmund, Lazio, Monaco, Atletico Madrid, Manchester City, Brighton and Hove Albion, Sheffield United, Burnley, Arminia, Norwich City]"), 
+    type = "random"
+  ), 
+  ci = FALSE
+) +
+  scale_color_manual(
+    values = c("#FDE100", "#87D8F7", "#E51B22", "#CB3524", "#6CABDD", "#0057B8", "#EE2737", "#6C1D45", "#004E95", "#00A650"),
+    labels = c('Dortmund', 'Lazio', 'Monaco', 'Atl. Madrid', 'Man City', 'Brighton', 'Sheffield Utd', 'Burnley', 'Arminia', 'Norwich')
+  ) +
+  theme(
+    legend.title = element_blank(),
+    legend.text = element_text(size = 6),
+    legend.position = "bottom"
+  ) +
+  labs(
+    title = "Predicted counts of Goals (Standard)",
+    caption = "Figure 8",
+    x = "xG (Non-Penalty)",
+    y = "Goals (Standard)"
+  )
+```
+
+```{r}
+f7 + f8 +
+  plot_annotation(title = "Random Effects")
+```
+
+# Conclusions
+
+## Summary
+
+-   Accounting for the quality of the shots taken throughout a match as fixed effects in the model helped to better explain the number of standard goals scored in a match
+    -   Shots on target (SoT)
+    -   Non-Penalty xG
+-   Both variables had positive relationships with respect to the number of standard goals scored in a match
+-   There is significant variability in the rate at which teams score standard goals in a match
+    -   Random team intercepts
+    
+------------------------------------------------------------------------
+
+## Next Steps
+
+-   Next Steps
+    -   Model for penalty kick scoring
+    -   Model for own goal scoring
+    -   Test for significant opposing team random effect
+    

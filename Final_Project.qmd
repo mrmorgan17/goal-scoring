@@ -1,0 +1,974 @@
+---
+title: "Better Understanding Goal Scoring in Soccer Matches"
+author: "Matthew Morgan"
+format: pdf
+geometry: margin=1in
+editor: visual
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE)
+options(knitr.kable.NA = '')
+
+library(brms)
+library(DHARMa)
+library(ggeffects)
+library(knitr)
+library(kableExtra)
+library(lme4)
+library(patchwork)
+library(tidyverse)
+library(worldfootballR)
+
+load("~/Documents/Stat 637/TeamMatchShooting.RData")
+```
+
+## Introduction
+
+In soccer, the obvious main objective is to score more goals than the opponent. Perhaps just as obvious is that in order to score goals, a team must take shots. Although, what characteristics about the shots that a team takes throughout a match determine how many goals are scored? This question forms the basis of the first goal of this analysis which will be to find shot-specific variables that can better explain the number of goals scored in a match.
+
+Additionally, there is often much variation in goal scoring due to the teams that are playing. Some of this variation is due to tactics. Teams may take a possession-based approach and are constantly taking shots throughout the game while other teams may focus on maintaining a low defensive block, soaking up pressure from the opposition, and taking their shots on counterattacks. Additionally, some teams have higher quality players throughout their squad and as a result, the team does better at taking higher quality shots throughout a match. Furthermore, the expected scoring output of a team often varies from the actual scoring output of a team. For example, a team could have taken 20 shots in a game, have been expected to score 3 goals, and actually scored 1. Another team may have only taken 7 shots, have been expected to score 1 goal, and actually scored 2. Given all these considerations that will have to be made for teams, the second goal of this analysis will be to fit a model that is able to account for the team-specific variation in goal scoring after accounting for the shot-specific variables that have been identified as being able to better explain the number of goals scored in a match.
+
+The rest of the paper will have the following format. The source of the data will be identified and the data sets used in this analysis will be explained. Next the model utilized to accomplish the goals of this analysis will be outlined mathematically and justified by model comparison and diagnostics. Finally, the results of the model will be shown as well as explaining the strengths and weaknesses of the model in accomplishing the goals of this analysis.
+
+## Data and Exploratory Data Analysis
+
+```{r, eval = FALSE}
+# 3 Seasons of Premier League team match-level shooting data
+
+EPL_2020_league_url <- fb_league_urls(country = "ENG", gender = "M", season_end_year = 2020, tier = "1st")
+EPL_2020_team_urls <- fb_teams_urls(EPL_2020_league_url)
+
+EPL_2020_team_match_shooting <- fb_team_match_log_stats(team_urls = EPL_2020_team_urls, stat_type = "shooting", time_pause = 3) %>% 
+  filter(Comp == "Premier League" & ForAgainst == "For")
+
+EPL_2021_league_url <- fb_league_urls(country = "ENG", gender = "M", season_end_year = 2021, tier = "1st")
+EPL_2021_team_urls <- fb_teams_urls(EPL_2021_league_url)
+
+EPL_2021_team_match_shooting <- fb_team_match_log_stats(team_urls = EPL_2021_team_urls, stat_type = "shooting", time_pause = 3) %>% 
+  filter(Comp == "Premier League" & ForAgainst == "For")
+
+EPL_2022_league_url <- fb_league_urls(country = "ENG", gender = "M", season_end_year = 2022, tier = "1st")
+EPL_2022_team_urls <- fb_teams_urls(EPL_2022_league_url)
+
+EPL_2022_team_match_shooting <- fb_team_match_log_stats(team_urls = EPL_2022_team_urls, stat_type = "shooting", time_pause = 3) %>% 
+  filter(Comp == "Premier League" & ForAgainst == "For")
+
+EPL_team_match_shooting <- rbind(EPL_2020_team_match_shooting, EPL_2021_team_match_shooting, EPL_2022_team_match_shooting) %>% 
+  mutate(Dist_Standard = ifelse(is.na(Dist_Standard), 0, Dist_Standard))
+```
+
+```{r, eval = FALSE}
+# 3 Seasons of Premier League team match-level shooting data
+
+GBL_2020_league_url <- fb_league_urls(country = "GER", gender = "M", season_end_year = 2020, tier = "1st")
+GBL_2020_team_urls <- fb_teams_urls(GBL_2020_league_url)
+
+GBL_2020_team_match_shooting <- fb_team_match_log_stats(team_urls = GBL_2020_team_urls, stat_type = "shooting", time_pause = 3) %>% 
+  filter(Comp == "Bundesliga" & ForAgainst == "For")
+
+GBL_2021_league_url <- fb_league_urls(country = "GER", gender = "M", season_end_year = 2021, tier = "1st")
+GBL_2021_team_urls <- fb_teams_urls(GBL_2021_league_url)
+
+GBL_2021_team_match_shooting <- fb_team_match_log_stats(team_urls = GBL_2021_team_urls, stat_type = "shooting", time_pause = 3) %>% 
+  filter(Comp == "Bundesliga" & ForAgainst == "For")
+
+GBL_2022_league_url <- fb_league_urls(country = "GER", gender = "M", season_end_year = 2022, tier = "1st")
+GBL_2022_team_urls <- fb_teams_urls(GBL_2022_league_url)
+
+GBL_2022_team_match_shooting <- fb_team_match_log_stats(team_urls = GBL_2022_team_urls, stat_type = "shooting", time_pause = 3) %>% 
+  filter(Comp == "Bundesliga" & ForAgainst == "For")
+
+GBL_team_match_shooting <- rbind(GBL_2020_team_match_shooting, GBL_2021_team_match_shooting, GBL_2022_team_match_shooting) %>% 
+  mutate(Dist_Standard = ifelse(is.na(Dist_Standard), 0, Dist_Standard))
+```
+
+```{r, eval = FALSE}
+# 3 Seasons of Premier League team match-level shooting data
+
+ISA_2020_league_url <- fb_league_urls(country = "ITA", gender = "M", season_end_year = 2020, tier = "1st")
+ISA_2020_team_urls <- fb_teams_urls(ISA_2020_league_url)
+
+ISA_2020_team_match_shooting <- fb_team_match_log_stats(team_urls = ISA_2020_team_urls, stat_type = "shooting", time_pause = 3) %>% 
+  filter(Comp == "Serie A" & ForAgainst == "For")
+
+ISA_2021_league_url <- fb_league_urls(country = "ITA", gender = "M", season_end_year = 2021, tier = "1st")
+ISA_2021_team_urls <- fb_teams_urls(ISA_2021_league_url)
+
+ISA_2021_team_match_shooting <- fb_team_match_log_stats(team_urls = ISA_2021_team_urls, stat_type = "shooting", time_pause = 3) %>% 
+  filter(Comp == "Serie A" & ForAgainst == "For")
+
+ISA_2022_league_url <- fb_league_urls(country = "ITA", gender = "M", season_end_year = 2022, tier = "1st")
+ISA_2022_team_urls <- fb_teams_urls(ISA_2022_league_url)
+
+ISA_2022_team_match_shooting <- fb_team_match_log_stats(team_urls = ISA_2022_team_urls, stat_type = "shooting", time_pause = 3) %>% 
+  filter(Comp == "Serie A" & ForAgainst == "For")
+
+ISA_team_match_shooting <- rbind(ISA_2020_team_match_shooting, ISA_2021_team_match_shooting, ISA_2022_team_match_shooting) %>% 
+  mutate(Dist_Standard = ifelse(is.na(Dist_Standard), 0, Dist_Standard))
+```
+
+```{r, eval = FALSE}
+# 3 Seasons of Premier League team match-level shooting data
+
+SLL_2020_league_url <- fb_league_urls(country = "ESP", gender = "M", season_end_year = 2020, tier = "1st")
+SLL_2020_team_urls <- fb_teams_urls(SLL_2020_league_url)
+
+SLL_2020_team_match_shooting <- fb_team_match_log_stats(team_urls = SLL_2020_team_urls, stat_type = "shooting", time_pause = 3) %>% 
+  filter(Comp == "La Liga" & ForAgainst == "For")
+
+SLL_2021_league_url <- fb_league_urls(country = "ESP", gender = "M", season_end_year = 2021, tier = "1st")
+SLL_2021_team_urls <- fb_teams_urls(SLL_2021_league_url)
+
+SLL_2021_team_match_shooting <- fb_team_match_log_stats(team_urls = SLL_2021_team_urls, stat_type = "shooting", time_pause = 3) %>% 
+  filter(Comp == "La Liga" & ForAgainst == "For")
+
+SLL_2022_league_url <- fb_league_urls(country = "ESP", gender = "M", season_end_year = 2022, tier = "1st")
+SLL_2022_team_urls <- fb_teams_urls(SLL_2022_league_url)
+
+SLL_2022_team_match_shooting <- fb_team_match_log_stats(team_urls = SLL_2022_team_urls, stat_type = "shooting", time_pause = 3) %>% 
+  filter(Comp == "La Liga" & ForAgainst == "For")
+
+SLL_team_match_shooting <- rbind(SLL_2020_team_match_shooting, SLL_2021_team_match_shooting, SLL_2022_team_match_shooting) %>% 
+  mutate(Dist_Standard = ifelse(is.na(Dist_Standard), 0, Dist_Standard))
+```
+
+```{r, eval = FALSE}
+# 3 Seasons of Premier League team match-level shooting data
+
+FL1_2020_league_url <- fb_league_urls(country = "FRA", gender = "M", season_end_year = 2020, tier = "1st")
+FL1_2020_team_urls <- fb_teams_urls(FL1_2020_league_url)
+
+FL1_2020_team_match_shooting <- fb_team_match_log_stats(team_urls = FL1_2020_team_urls, stat_type = "shooting", time_pause = 3) %>% 
+  filter(Comp == "Ligue 1" & ForAgainst == "For")
+
+FL1_2021_league_url <- fb_league_urls(country = "FRA", gender = "M", season_end_year = 2021, tier = "1st")
+FL1_2021_team_urls <- fb_teams_urls(FL1_2021_league_url)
+
+FL1_2021_team_match_shooting <- fb_team_match_log_stats(team_urls = FL1_2021_team_urls, stat_type = "shooting", time_pause = 3) %>% 
+  filter(Comp == "Ligue 1" & ForAgainst == "For")
+
+FL1_2022_league_url <- fb_league_urls(country = "FRA", gender = "M", season_end_year = 2022, tier = "1st")
+FL1_2022_team_urls <- fb_teams_urls(FL1_2022_league_url)
+
+FL1_2022_team_match_shooting <- fb_team_match_log_stats(team_urls = FL1_2022_team_urls[1:20], stat_type = "shooting", time_pause = 3) %>% 
+  filter(Comp == "Ligue 1" & ForAgainst == "For")
+
+FL1_team_match_shooting <- rbind(FL1_2020_team_match_shooting, FL1_2021_team_match_shooting, FL1_2022_team_match_shooting) %>% 
+  mutate(Dist_Standard = ifelse(is.na(Dist_Standard), 0, Dist_Standard))
+```
+
+```{r, eval = FALSE}
+# 2019-22 season of team math-level data for the big 5 leagues
+
+big5_team_match_shooting2 <- rbind(
+  EPL_team_match_shooting, # England
+  GBL_team_match_shooting, # Germany
+  ISA_team_match_shooting, # Italy
+  SLL_team_match_shooting, # Spain
+  FL1_team_match_shooting  # France
+) %>% 
+  mutate(Dist_Standard = ifelse(is.na(Dist_Standard), 0, Dist_Standard))
+```
+
+```{r, eval = FALSE}
+# 2021-22 season of team math-level data for the big 5 leagues
+
+GBL_2022_league_url <- fb_league_urls(country = "GER", gender = "M", season_end_year = 2022, tier = "1st")
+GBL_2022_team_urls <- fb_teams_urls(GBL_2022_league_url)
+
+GBL_2022_team_match_shooting <- fb_team_match_log_stats(team_urls = GBL_2022_team_urls, stat_type = "shooting", time_pause = 3) %>% 
+  filter(Comp == "Bundesliga" & ForAgainst == "For")
+
+ISA_2022_league_url <- fb_league_urls(country = "ITA", gender = "M", season_end_year = 2022, tier = "1st")
+ISA_2022_team_urls <- fb_teams_urls(ISA_2022_league_url)
+
+ISA_2022_team_match_shooting <- fb_team_match_log_stats(team_urls = ISA_2022_team_urls, stat_type = "shooting", time_pause = 3) %>% 
+  filter(Comp == "Serie A" & ForAgainst == "For")
+
+SLL_2022_league_url <- fb_league_urls(country = "ESP", gender = "M", season_end_year = 2022, tier = "1st")
+SLL_2022_team_urls <- fb_teams_urls(SLL_2022_league_url)
+
+SLL_2022_team_match_shooting <- fb_team_match_log_stats(team_urls = SLL_2022_team_urls, stat_type = "shooting", time_pause = 3) %>% 
+  filter(Comp == "La Liga" & ForAgainst == "For")
+
+FL1_2022_league_url <- fb_league_urls(country = "FRA", gender = "M", season_end_year = 2022, tier = "1st")
+FL1_2022_team_urls <- fb_teams_urls(FLU_2022_league_url)
+
+FL1_2022_team_match_shooting <- fb_team_match_log_stats(team_urls = FL1_2022_team_urls[1:20], stat_type = "shooting", time_pause = 3) %>% 
+  filter(Comp == "Ligue 1" & ForAgainst == "For")
+
+big5_team_match_shooting <- rbind(
+  EPL_2022_team_match_shooting, # England
+  GBL_2022_team_match_shooting, # Germany
+  ISA_2022_team_match_shooting, # Italy
+  SLL_2022_team_match_shooting, # Spain
+  FL1_2022_team_match_shooting  # France
+) %>% 
+  mutate(Dist_Standard = ifelse(is.na(Dist_Standard), 0, Dist_Standard))
+```
+
+```{r}
+# The data for this analysis was obtained from FBref.com, a comprehensive website for football/soccer statistics from all over the world. Team-specific shooting data for each match in the 2019-2020, 2020-2021, and 2021-2022 English Premier League seasons as well as the 2019-2022 German Bundesliga, Spanish La Liga, Italian Serie A, and French Ligue 1 seasons were obtained. This team-specific shot data was used to create two data sets; one of the three English Premier League seasons previously mentioned and one of the 2019-2022 season of the "big 5" leagues in Europe. The three seasons of English Premier League data contained 2,280 entries of match shooting statistics for 24 different teams and the three seasons of the big 5 European leagues contained 10,754 entries of match shooting statistics for 120 different teams.
+```
+
+The data for this analysis was obtained from FBref.com, a comprehensive website for football/soccer statistics from all over the world. Team-specific shooting data for each match in the 2019-2020, 2020-2021, and 2021-2022 English Premier League seasons as well as the 2019-2022 German Bundesliga, Spanish La Liga, Italian Serie A, and French Ligue 1 seasons were obtained. This team-specific shot data was then combined into a single data set of the "Big 5" leagues in Europe. These three seasons of the Big 5 European leagues contained 10,754 entries of match shooting statistics for 120 different teams.
+
+While there were multiple shooting variables available in each data set, only three were considered for this analysis. The number of standard goals scored by the team, the number of shots on target (SoT) taken by the team, and the amount of non-penalty expected goals generated by the team. Standard goals are goals the team scored that were not penalty kicks or own goals. Shots on target are shots that either go into the net or are saved by the goalkeeper. Expected goals (xG) measures the quality of a shot based on several variables such as assist type, shot angle and distance from goal, whether it was a headed shot and whether it was defined as a big chance.
+
+```{r}
+big5_SoT_plot <- ggplot(big5_team_match_shooting2, aes(x = SoT_Standard, y = Gls_Standard)) +
+  geom_point() +
+  theme_minimal() +
+  labs(
+    title = "Shots on Target vs Goals (Standard)",
+    caption = "Figure 1",
+    x = "Shots on Target",
+    y = "Standard Goals",
+  )
+```
+
+```{r}
+big5_npxG_plot <- ggplot(big5_team_match_shooting2, aes(x = npxG_Expected, y = Gls_Standard)) +
+  geom_point() +
+  theme_minimal() +
+  labs(
+    title = "xG (Non-Penalty) vs Goals (Standard)",
+    caption = "Figure 2",
+    x = "xG (Non-Penalty)",
+    y = "Goals (Standard)"
+  )
+```
+
+```{r, fig.width = 8}
+big5_SoT_plot + big5_npxG_plot
+```
+
+```{r}
+# Figure 1 is a scatter plot of shots on target vs standard goals for the 2019-2022 big 5 European leagues data set. This scatter plot suggests an increasing relationship between the number of shots on target in a match and the number of standard goals scored in a match. Figure 2 is a scatter plot of non-penalty xG vs standard goals for the 2019-2022 big 5 European leagues data set. This scatter plot also suggests an increasing relationship between non-penalty xG generated in a match and the number of standard goals scored in a match. Additionally, it should be noted that similar trends were present in the 2019-2022 Premier League data set.
+```
+
+Figure 1 is a scatter plot of shots on target vs standard goals and it suggests an increasing relationship between the number of shots on target taken in a match and the number of standard goals scored in a match. Figure 2 is a scatter plot of non-penalty xG vs standard goals and it also suggests an increasing relationship between the amount of non-penalty xG generated in a match and the number of standard goals scored in a match.
+
+## Model
+
+### Poisson Generalized Linear Mixed Model (GLMM)
+
+```{r}
+EPL_glmm <- glmer(
+  Gls_Standard ~ SoT_Standard + npxG_Expected + (1|Team), 
+  data = EPL_team_match_shooting, 
+  family = poisson
+)
+# Random slope and intercept
+```
+
+```{r}
+big5_glmm <- glmer(
+  Gls_Standard ~ SoT_Standard + npxG_Expected + (1|Team), 
+  data = big5_team_match_shooting2, 
+  family = poisson
+)
+```
+
+```{r, eval = FALSE}
+# With the interaction, model is too complex
+big5_glmm3 <- glmer(
+  Gls_Standard ~ SoT_Standard*npxG_Expected + (1|Team), 
+  data = big5_team_match_shooting2, 
+  family = poisson
+)
+```
+
+```{r, eval = FALSE}
+brm(
+  Gls_Standard ~ SoT_Standard + npxG_Expected + (1|Team),
+  data = big5_team_match_shooting,
+  family = poisson("log"),
+  chains = 2, # nb of chains
+  iter = 5000, # nb of iterations, including burnin
+  warmup = 1000, # burnin
+  thin = 1
+)
+```
+
+$$
+y_i \sim \text{Poisson}(\lambda_i) 
+$$ $$
+\log(\lambda_i) = \eta_i
+$$ $$
+\eta_i = (\beta_0 + T_{0t}) + \beta_1x_{i1} + \beta_2x_{i2} + \epsilon_{ti}
+$$
+
+-   $y_i$: number of standard goals scored in the $i^{\text{th}}$ match
+-   $x_{i1}$: number of shots on target in the $i^{\text{th}}$ match
+-   $x_{i2}$: non-penalty expected goals generated in the $i^{\text{th}}$ match
+-   $\beta_0$: the log mean number of standard goals in a match where there were 0 shots on target and 0 non-penalty expected goals generated in a match is expected to be $\beta_0$ on average
+-   $\beta_1$: holding all else constant, the log mean number of standard goals in a match is expected to change by $\beta_1$ as the number of shots on target taken in a match increases by 1 on average
+-   $\beta_2$: holding all else constant, the log mean number of standard goals in a match is expected to change by $\beta_2$ as the amount of non-penalty expected goals generated in a match increases by 1 on average
+-   $T_{0t}$: random team intercept effect fot the $t^{\text{th}}$ team which represents a variation from the overall intercept ($\beta_0$), it allows the model's estimates of standard goals scored in a match to vary by team
+
+## Model Justification
+
+```{r}
+# Multiple justifications need to be made for the previous model. Additionally, it should be noted that because of the fact that inference was the main focus of this analysis, the predictive capabilities of the model were not further considered.
+```
+
+```{r}
+EPL_null_glm <- glm(
+  Gls_Standard ~ 1, 
+  data = EPL_team_match_shooting, 
+  family = poisson
+)
+
+EPL_SoT_glm <- glm(
+  Gls_Standard ~ SoT_Standard, 
+  data = EPL_team_match_shooting, 
+  family = poisson
+)
+
+EPL_npxG_glm <- glm(
+  Gls_Standard ~ npxG_Expected, 
+  data = EPL_team_match_shooting, 
+  family = poisson
+)
+
+EPL_SoT_npxG_glm <- glm(
+  Gls_Standard ~ SoT_Standard + npxG_Expected, 
+  data = EPL_team_match_shooting, 
+  family = poisson
+)
+
+# EPL_SoT_npxG_int_glm <- glm(
+#   Gls_Standard ~ SoT_Standard*npxG_Expected, 
+#   data = EPL_team_match_shooting, 
+#   family = poisson
+# )
+```
+
+```{r}
+EPL_fixed <- cbind(
+  c("Null", "npxG", "SoT", "npxG + SoT"),
+  anova(EPL_null_glm, EPL_npxG_glm, EPL_SoT_glm, EPL_SoT_npxG_glm), 
+  c(AIC(EPL_null_glm), AIC(EPL_npxG_glm), AIC(EPL_SoT_glm), AIC(EPL_SoT_npxG_glm))
+) %>% 
+  data.frame() %>% 
+  select(-2)
+```
+
+```{r, eval = FALSE}
+t1 <- kable(
+  EPL_fixed, 
+  digits = 1, 
+  booktabs = TRUE, 
+  format = "latex",
+  escape = FALSE,
+  align = c("l", rep("c", 4)), 
+  col.names = c("Model", "Resid. Dev.", "Df", "$\\Delta$D", "AIC")
+) %>% 
+  kable_styling(latex_options = "HOLD_position", font_size = 9) %>% 
+  add_footnote("2019-2022 Premier League", notation = "none")
+```
+
+```{r}
+big5_null_glm <- glm(
+  Gls_Standard ~ 1, 
+  data = big5_team_match_shooting2, 
+  family = poisson
+)
+
+big5_SoT_glm <- glm(
+  Gls_Standard ~ SoT_Standard, 
+  data = big5_team_match_shooting2, 
+  family = poisson
+)
+
+big5_npxG_glm <- glm(
+  Gls_Standard ~ npxG_Expected, 
+  data = big5_team_match_shooting2, 
+  family = poisson
+)
+
+big5_SoT_npxG_glm <- glm(
+  Gls_Standard ~ SoT_Standard + npxG_Expected, 
+  data = big5_team_match_shooting2, 
+  family = poisson
+)  
+
+big5_SoT_npxG_int_glm <- glm(
+  Gls_Standard ~ SoT_Standard*npxG_Expected,
+  data = big5_team_match_shooting2,
+  family = poisson
+)
+```
+
+```{r}
+big5_fixed <- cbind(
+  c("Null", "npxG", "SoT", "npxG + SoT", "npxG*SoT"),
+  anova(big5_null_glm, big5_npxG_glm, big5_SoT_glm, big5_SoT_npxG_glm, big5_SoT_npxG_int_glm), 
+  c(AIC(big5_null_glm), AIC(big5_npxG_glm), AIC(big5_SoT_glm), AIC(big5_SoT_npxG_glm), AIC(big5_SoT_npxG_int_glm))
+) %>% 
+  data.frame() %>% 
+  select(-2)
+```
+
+```{r}
+kable(
+  big5_fixed, 
+  digits = 1, 
+  caption = "Fixed Effects Testing",
+  booktabs = TRUE, 
+  format = "latex",
+  escape = FALSE,
+  align = c("l", rep("c", 4)), 
+  col.names = c("Model", "Resid. Dev.", "Df", "$\\Delta$D", "AIC")
+) %>% 
+  kable_styling(latex_options = "HOLD_position", font_size = 9) # %>% 
+  # add_footnote("2019-2022 Big 5 European Leagues", notation = "none")
+```
+
+```{r, eval = FALSE, echo = FALSE, results = 'asis'}
+cat("\n")
+cat("\\begin{table}[!htb]")
+cat(c("\\begin{minipage}{.5\\linewidth}
+       \\caption{Fixed Effects Testing}
+       \\centering",
+         t1,
+     "\\end{minipage}%
+     \\begin{minipage}{.5\\linewidth}
+       \\centering
+         \\caption{Fixed Effects Testing}",
+         t2,
+     "\\end{minipage}") )
+cat("\\end{table}")
+```
+
+```{r}
+# Table 1 and Table 2 provide justification for including shots on target and non-penalty XG as fixed effects in the model. It can be seen that individually, both variables had significant changes in deviance from a null model and the AIC decreased. Additionally, when both variables were included together, there was still a significant change in deviance and the AIC further decreased. Finally, when the addition of an interaction fixed effect between shots on target and non-penalty xG was considered along with both variables separately, this resulted in another significant change in deviance and the AIC again decreased. Furthermore, these results held across both data sets considered.
+
+# It is important to note that whether or not a shot was on target is not explicitly used in the xG calculation of a shot so shots on target is not nested within the xG calculation. As a result of this, shots on target and non-penalty xG could be included separately as fixed effects in the model.
+```
+
+Table 1 provides justification for including shots on target and non-penalty xG as fixed effects in the model. It can be seen that individually, both variables had significant changes in deviance from a null model and that the AIC decreased. Additionally, when both variables were included together, there was still a significant change in deviance and the AIC further decreased.
+
+Finally, while there was still a significant change in deviance and further reduction of AIC when the interaction between shots on target and non-penalty xG was considered in addition to both of the variables separately, when a random intercept team effect was added along with those three fixed effects, the model failed to converge and was nearly unidentifiable so it was decided to leave the interaction out of the model.
+
+```{r}
+EPL_random <- cbind(
+  c("GLM", "GLMM"),
+  anova(EPL_glmm, EPL_SoT_npxG_glm)
+) %>% 
+  mutate(
+    AIC = round(AIC, 1),
+    BIC = round(BIC, 1),
+    logLik = round(logLik, 1),
+    deviance = round(deviance, 1),
+    Chisq = round(Chisq, 1),
+    `Pr(>Chisq)` = round(`Pr(>Chisq)`, 3)
+  )
+
+rownames(EPL_random) <- NULL
+```
+
+```{r, eval = FALSE}
+kable(
+  EPL_random, 
+  caption = "Random Effects Testing",
+  booktabs = TRUE, 
+  format = "latex",
+  escape = FALSE,
+  align = c("l", rep("c", 8)), 
+  col.names = c("Model", "npar", "AIC", "BIC", "logLik", "deviance", "Chisq", "Df", "Pr(>Chisq)")
+) %>% 
+  kable_styling(latex_options = "HOLD_position", font_size = 9) %>% 
+  add_footnote("2019-2022 Premier League", notation = "none")
+```
+
+```{r}
+big5_random <- cbind(
+  c("GLM", "GLMM"),
+  anova(big5_glmm, big5_SoT_npxG_glm)
+)
+
+rownames(big5_random) <- NULL
+```
+
+```{r}
+kable(
+  big5_random, 
+  digits = 1, 
+  caption = "Random Effects Testing",
+  booktabs = TRUE, 
+  format = "latex",
+  escape = FALSE,
+  align = c("l", rep("c", 8)), 
+  col.names = c("Model", "npar", "AIC", "BIC", "logLik", "deviance", "Chisq", "Df", "Pr(>Chisq)")
+) %>% 
+  kable_styling(latex_options = "HOLD_position", font_size = 9) # %>% 
+  # add_footnote("2019-2022 Big 5 Eurpoean Leagues", notation = "none")
+```
+
+```{r}
+# Table 3 and Table 4 provide justification for the inclusion of random team intercept effects in the model. It can be seen that the addition of the random team intercept effects had significant changes in deviance from the GLM fixed effects model (with npxG + SoT) and the that AIC decreased. Furthermore, these results again held across both data sets considered. Although, it should be noted that the BIC of the GLMM model fit on the 2019-2022 data set had a higher BIC than the GLM model fit on that same data set. 
+
+# Even with this, the random slope effects of shots on target within team effect with correlated random intercept effects remained in the model mainly due to the fact that the $\chi^2$ likelihood ratio test indicated a significant decrease in deviance with the inclusion of the random effects for both data sets considered.
+```
+
+Table 2 provides justification for the inclusion of a random team intercept effect in the model. The results of the $\chi^2$ likelihood ratio test that was performed for a model without a random intercept team effect (GLM) vs a model with a random intercept team effect (GLMM) where both models also had fixed effects for shots on target and non-penalty xG show that the GLMM had a significant change in deviance compared to the GLM. Additionally, the AIC and BIC were both lower for the GLMM than the GLM.
+
+```{r}
+overdisp_fun <- function(model) {
+  rdf <- df.residual(model)
+  rp <- residuals(model, type = "pearson")
+  Pearson.chisq <- sum(rp^2)
+  prat <- Pearson.chisq / rdf
+  pval <- pchisq(Pearson.chisq, df = rdf, lower.tail = FALSE)
+  c(chisq = Pearson.chisq, ratio = prat, rdf = rdf, p = pval)
+}
+```
+
+```{r}
+# rbind(
+#   c("2019-2022 Premier League", round(overdisp_fun(EPL_glmm), 3)),
+#   c("2019-2022 Big 5 European Leagues", round(overdisp_fun(big5_glmm), 3))) 
+
+t(round(overdisp_fun(big5_glmm), 3)) %>% 
+  kable(
+    ., 
+    caption = "Overdispersion Testing",
+    booktabs = TRUE, 
+    format = "latex",
+    escape = FALSE,
+    align = "c", 
+    col.names = c("$\\chi^2$ Test Statistic", "Ratio", "Resid. Df", "p-value")
+  ) %>% 
+  kable_styling(latex_options = "HOLD_position", font_size = 9)
+```
+
+Table 3 contains the results of the $\chi^2$ likelihood ratio test of the overdispersion parameter ($\phi$) for the model and provides justification as to why the model did not include an overdispersion parameter. For a GLMM, the usual procedure of calculating the sum of squared Pearson residuals and comparing it to the residual degrees of freedom gives an approximate estimate of an overdispersion parameter. Given that $H_0: \phi = 1$ and $H_1: \phi > 1$, it can be concluded that there is not enough evidence to reject the null hypothesis that there is no overdispersion.
+
+Standard residuals for a GLMM are hard to assess as the plots often seem to show problems such as non-normality and heteroscedasticity, even if the model is correctly specified. As a workaround to this common issue, the `DHARMa` package (Hartig, 2022) was utilized to create residuals for GLMMs that can be interpreted as intuitively as residuals for a linear model. The `DHARMa` package simulates scaled residuals that should asymptotically follow a standard uniform distribution, Uniform(0,1), for a correctly specified model in the following way:
+
+-   Simulate new response data from the fitted model for each observation
+-   For each observation, calculate the empirical cumulative density function for the simulated observations, which describes the possible values (and their probability) at the predictor combination of the observed value, assuming the fitted model is correct
+-   The residual is then defined as the value of the empirical density function at the value of the observed data, so a residual of 0 means that all simulated values are larger than the observed value, and a residual of 0.5 means half of the simulated values are larger than the observed value
+
+For this analysis, the simulated scaled residuals from the `DHARMa` package were transformed to follow a normal distribution and then residual plots were created with these simulated normal residuals.
+
+```{r}
+EPL_glmm_simres <- simulateResiduals(EPL_glmm)
+# The function creates scaled residuals by simulating from the fitted model. 
+```
+
+```{r}
+# Normal Q-Q
+EPL_norm_qq <- ggplot() + 
+  geom_qq(aes(sample = residuals(EPL_glmm_simres, quantileFunction = qnorm, outlierValues = c(-7,7)))) + 
+  geom_qq_line(aes(sample = residuals(EPL_glmm_simres, quantileFunction = qnorm, outlierValues = c(-7,7))), lty = 3) + 
+  theme_minimal() +
+  labs(
+    title = 'Normal Q-Q Plot',
+    caption = "Figure 3",
+    x = 'Theoretical Quantities',
+    y = 'DHARMa Residuals'
+  )
+```
+
+```{r}
+# Residuals vs Fitted
+EPL_resid_fit <- ggplot() +
+  geom_point(
+    aes(
+      x = predict(EPL_glmm, type = 'response'), 
+      y = residuals(EPL_glmm_simres, quantileFunction = qnorm, outlierValues = c(-7,7))
+    )
+  ) +
+  geom_smooth(
+    aes(
+      x = predict(EPL_glmm, type = 'response'), 
+      y = residuals(EPL_glmm_simres, quantileFunction = qnorm, outlierValues = c(-7,7))
+    ), 
+    method = 'loess', 
+    formula = 'y ~ x',
+    se = FALSE, 
+    color = 'red'
+  ) +
+  geom_hline(yintercept = 0, lty = 3) +
+  theme_minimal() +
+  labs(
+    title = 'Residuals vs Fitted Values',
+    caption = "Figure 4",
+    x = 'Fitted Values',
+    y = 'DHARMa Residuals'
+  )
+```
+
+```{r, eval = FALSE, fig.width = 8}
+EPL_norm_qq + EPL_resid_fit +
+  plot_annotation(title = "2019-2022 Premier League")
+```
+
+```{r}
+# Figure 3 and Figure 4 are residual plots that provide justification that the model fit the 2019-2022 Premier League data set well. All of the residuals fell along or were close to the straight line which suggested that the data plausibly came from a Poisson distribution. Furthermore, the polynomial regression fit to the residuals vs fitted plot (red line in Figure 4) was fairly flat which suggested that there were no significant patterns in the residuals and that the model is again reasonable for the data.
+```
+
+```{r}
+big5_glmm_simres <- simulateResiduals(big5_glmm)
+# The function creates scaled residuals by simulating from the fitted model. 
+```
+
+```{r}
+# Normal Q-Q
+big5_norm_qq <- ggplot() + 
+  geom_qq(aes(sample = residuals(big5_glmm_simres, quantileFunction = qnorm, outlierValues = c(-7,7)))) + 
+  geom_qq_line(aes(sample = residuals(big5_glmm_simres, quantileFunction = qnorm, outlierValues = c(-7,7))), lty = 3) + 
+  theme_minimal() +
+  labs(
+    title = 'Normal Q-Q Plot',
+    caption = "Figure 3",
+    x = 'Theoretical Quantities',
+    y = 'DHARMa Residuals'
+  )
+```
+
+```{r}
+# Residuals vs Fitted
+big5_resid_fit <- ggplot() +
+  geom_point(
+    aes(
+      x = predict(big5_glmm, type = 'response'), 
+      y = residuals(big5_glmm_simres, quantileFunction = qnorm, outlierValues = c(-7,7))
+    )
+  ) +
+  geom_smooth(
+    aes(
+      x = predict(big5_glmm, type = 'response'), 
+      y = residuals(big5_glmm_simres, quantileFunction = qnorm, outlierValues = c(-7,7))
+    ), 
+    method = 'loess', 
+    formula = 'y ~ x',
+    se = FALSE, 
+    color = 'red'
+  ) +
+  geom_hline(yintercept = 0, lty = 3) +
+  theme_minimal() +
+  labs(
+    title = 'Residuals vs Fitted Values',
+    caption = "Figure 4",
+    x = 'Fitted Values',
+    y = 'DHARMa Residuals'
+  )
+```
+
+```{r, fig.width = 8}
+big5_norm_qq + big5_resid_fit
+```
+
+```{r, eval = FALSE}
+# Finding the locations of the outlying residuals
+which(residuals(big5_glmm_simres, quantileFunction = qnorm, outlierValues = c(-7,7)) == -7)
+
+# Removing the outliers
+big5_team_match_shooting3 <- big5_team_match_shooting2[-c(which(residuals(big5_glmm_simres, quantileFunction = qnorm, outlierValues = c(-7,7)) == -7)),]
+
+# Fitting a model without the outliers
+big5_glmm2 <- glmer(
+  Gls_Standard ~ SoT_Standard + npxG_Expected + (1|Team), 
+  data = big5_team_match_shooting3, 
+  family = poisson
+)
+
+# Checking model estimates
+summary(big5_glmm2)
+# None drastically change
+```
+
+Figure 3 and Figure 4 are residual plots that provide justification that the model fit the data set well. A majority of the residuals fell along or were close to the straight line save three clear outliers which suggested that the data plausibly came from a Poisson distribution. Furthermore, the residuals vs fitted vales plot showed a fairly even spread of residuals above and below the $y = 0$ line save the three clear outliers mentioned previously. Overall, this suggested that there were no significant patterns in the residuals and that the model is again reasonable for the data.
+
+To ensure that the outliers were not having a significant impact on model estimates, the same model was fit to a new data set where the three outliers had been removed and the resulting model estimates did not significantly change from the model that was fit on all of the data.
+
+```{r, eval = FALSE}
+# R-squared
+
+r2.corr.mer <- function(m) {
+  lmfit <-  lm(model.response(model.frame(m)) ~ fitted(m))
+  summary(lmfit)$r.squared
+}
+
+r2.corr.mer(EPL_glmm)
+
+# omega^2_0 (Xu 2003), which is almost the same, is based on comparing the residual variance of the full model against the residual variance of a (fixed) intercept-only null model:
+
+1 - var(residuals(EPL_glmm)) / var(model.response(model.frame(EPL_glmm)))
+
+# Another possibility is the squared correlation between the response variable and the predicted values:
+
+cor(model.response(model.frame(EPL_glmm)), predict(EPL_glmm, type = "response"))^2
+
+# r2glmm package
+
+r2glmm::r2beta(model = EPL_glmm, method = 'sgv', data = big5_team_match_shooting)
+
+# (R_\beta^2), a standardized measure of multivariate association between the fixed predictors and the observed outcome. 
+# This statistic is primarily used to select fixed effects in the linear and generalized linear mixed model.
+
+performance::r2(EPL_glmm)
+
+MuMIn::r.squaredGLMM(EPL_glmm)
+```
+
+## Results
+
+```{r}
+# rbind(
+#   c("2019-2022 Premier League", round(fixef(EPL_glmm), 3)),
+#   c("2019-2022 Big 5 European Leagues", round(fixef(big5_glmm), 3))
+# ) 
+
+t(round(fixef(big5_glmm), 3)) %>% 
+  data.frame() %>% 
+  kable(
+    ., 
+    caption = "Fixed Effects Estimates",
+    booktabs = TRUE, 
+    format = "latex",
+    escape = FALSE,
+    align = c("l", rep("c", 3)), 
+    col.names = c("Intercept", "SoT", "npxG")
+  ) %>% 
+  kable_styling(latex_options = "HOLD_position", font_size = 9)
+```
+
+```{r}
+# Table 6 provides the estimates of the fixed effects for shots on target and non-penalty xG for both data sets considered in this analysis. Overall, it can be concluded that as the number of shots on target taken or the non-penalty xG generated in a match increases, the number of standard goals scored in a match is expected to increase as well. More specifically, it appears that the number of standard goals scored in a match increases more with respect to increases in non-penalty xG generation than with respect to the increase in the number of shots on target. Additionally, it is interesting to note that with the exception of the intercept, the fixed effects are similarly estimated across data sets.
+```
+
+Table 4 provides the model estimates of the fixed effects for shots on target and non-penalty xG. Overall, it can be concluded that as the number of shots on target taken or the amount of non-penalty xG generated in a match increases, the number of standard goals scored in a match is expected to increase as well. More specifically, it appears that the number of standard goals scored in a match increases more with respect to increases in the amount of non-penalty xG generated than with respect to the increase in the number of shots on target taken.
+
+```{r}
+f5 <- plot(ggpredict(big5_glmm, terms = "SoT_Standard")) +
+  theme(legend.position = "bottom") +
+  labs(
+    title = "Predicted counts of Goals (Standard)",
+    caption = "Figure 5",
+    x = "Shots on Target",
+    y = "Goals (Standard)"
+  )
+```
+
+```{r}
+f6 <- plot(ggpredict(big5_glmm, terms = "npxG_Expected")) +
+  theme(legend.position = "bottom") +
+  labs(
+    title = "Predicted counts of Goals (Standard)",
+    caption = "Figure 6",
+    x = "xG (Non-Penalty)",
+    y = "Goals (Standard)"
+  )
+```
+
+```{r, fig.width = 8}
+f5 + f6 +
+  plot_annotation(title = "Fixed Effects")
+```
+
+Figure 5 provides a visual representation of the estimated marginal effect that the number of shots on target taken in a match has on the number of standard goals scored in a match as well as the confidence interval of that effect. Figure 6 provides a visual representation of the estimated marginal effect that the amount of non-penalty xG generated in a match has on the number of standard goals scored in a match as well as the confidence interval of that effect. It should also be noted that there is more uncertainty in what the marginal effects of shots on target and non-penalty xG is for the number of standard goals scored for higher values of shots on target and non-penalty xG. Overall, these visualizations reinforce the earlier stated conclusions that as the number of shots on target taken or the non-penalty xG generated in a match increases, the number of standard goals scored in a match is expected to increase as well.
+
+Based on these results for the fixed effects, it appears that the model effectively accomplishes the first goal of this analysis as the number of shots on target taken in a match as well as the non-penalty xG generated in a match help to better explain the number of standard goals scored in a match.
+
+```{r, eval = FALSE}
+EPL_ranef <- ranef(EPL_glmm)$Team %>% 
+  data.frame() %>% 
+  rownames_to_column(., "Team") 
+
+t7 <- rbind(
+  EPL_ranef[order(EPL_ranef$X.Intercept., decreasing = TRUE)[1:5],],
+  EPL_ranef[order(EPL_ranef$X.Intercept.)[1:5],]
+) %>% 
+  kable(
+    digits = 3,
+    row.names = FALSE,
+    booktabs = TRUE, 
+    format = "latex",
+    escape = FALSE,
+    align = c("l", "c"),
+    col.names = c("Team", "Intercept")
+  ) %>% 
+  pack_rows("Five Highest Random Intercepts", start_row = 1, end_row = 5) %>% 
+  pack_rows("Five Lowest Random Intercepts", start_row = 6, end_row = 10) %>% 
+  kable_styling(latex_options = "HOLD_position", font_size = 9) %>% 
+  add_footnote("2019-2022 Premier League", notation = "none")
+
+# Largest positive random intercept and larget negative slope...
+```
+
+```{r}
+big5_ranef <- ranef(big5_glmm)$Team %>% 
+  data.frame() %>% 
+  rownames_to_column(., "Team") 
+
+t5 <- big5_ranef[order(big5_ranef$X.Intercept., decreasing = TRUE)[1:5],] %>% 
+  kable(
+    digits = 3,
+    row.names = FALSE,
+    booktabs = TRUE, 
+    format = "latex",
+    escape = FALSE,
+    align = c("l", "c"),
+    col.names = c("Team", "Intercept")
+  ) %>% 
+  kable_styling(latex_options = "HOLD_position", font_size = 9) # %>% 
+  # add_footnote("2019-2022 Big 5 European Leagues", notation = "none")
+  
+t6 <- big5_ranef[order(big5_ranef$X.Intercept.)[1:5],] %>% 
+  kable(
+    digits = 3,
+    row.names = FALSE,
+    booktabs = TRUE, 
+    format = "latex",
+    escape = FALSE,
+    align = c("l", "c"),
+    col.names = c("Team", "Intercept")
+  ) %>% 
+  kable_styling(latex_options = "HOLD_position", font_size = 9) # %>% 
+  # add_footnote("2019-2022 Big 5 European Leagues", notation = "none")
+```
+
+```{r}
+# Table 7 provides the five highest and lowest random intercepts for teams for the 2019-2022 Premier League data set and Table 8 provides the five highest and lowest random intercepts for teams for the 2019-2022 big 5 European leagues data set. The simple way to think about these random intercept effects is that the higher the random intercept effect, the higher the estimated number of standard goals scored in a match will be for that team.
+```
+
+```{r, echo = FALSE, results = 'asis'}
+cat("\n")
+cat("\\begin{table}[!htb]")
+cat(c("\\begin{minipage}{.5\\linewidth}
+       \\caption{Five Highest Random Team Intercepts}
+       \\centering",
+         t5,
+     "\\end{minipage}%
+     \\begin{minipage}{.5\\linewidth}
+       \\centering
+         \\caption{Five Lowest Random Team Intercepts}",
+         t6,
+     "\\end{minipage}") )
+cat("\\end{table}")
+```
+
+Table 5 provides the five highest random team intercepts and Table 6 provides the five lowest random team intercepts from the model. The simple way to think about these random team intercepts is that the higher the random team intercept, the higher the estimated number of standard goals scored in a match will be for that team.
+
+```{r, eval = FALSE}
+f9 <- plot(
+  ggpredict(
+    EPL_glmm, 
+    terms = c("SoT_Standard", "Team [Liverpool, Tottenham Hotspur, Leicester City, Machnester City, Arsenal, Burnley, Sheffield Untied, Watford, Fulham, Norwich City]"), 
+    type = "random"
+  ), 
+  ci = FALSE
+) +
+  scale_color_manual(
+    values = c("#C8102E", "#132257", "#003090", "#6CABDD", "#EF0107", "#6C1D45", "#EE2737", "#FBEE23", "#11210C", "#00A650"),
+    labels = c('Liverpool', 'Tottenham', 'Leicester', 'Man City', 'Arsenal', 'Burnley', 'Sheffield Utd', 'Watford', 'Fulham', 'Norwich')
+  ) +
+  theme(
+    legend.title = element_blank(),
+    legend.text = element_text(size = 6),
+    legend.position = "bottom"
+  ) +
+  labs(
+    title = "Predicted counts of Goals (Standard)",
+    subtitle = "2019-2022 Preimer League",
+    caption = "Figure 9",
+    x = "Shots on Target",
+    y = "Goals (Standard)"
+  )
+```
+
+```{r}
+f7 <- plot(
+  ggpredict(
+    big5_glmm, 
+    terms = c("SoT_Standard", "Team [Dortmund, Lazio, Monaco, Atletico Madrid, Manchester City, Brighton and Hove Albion, Sheffield United, Burnley, Arminia, Norwich City]"), 
+    type = "random"
+  ), 
+  ci = FALSE
+) +
+  scale_color_manual(
+    values = c("#FDE100", "#87D8F7", "#E51B22", "#CB3524", "#6CABDD", "#0057B8", "#EE2737", "#6C1D45", "#004E95", "#00A650"),
+    labels = c('Dortmund', 'Lazio', 'Monaco', 'Atl. Madrid', 'Man City', 'Brighton', 'Sheffield Utd', 'Burnley', 'Arminia', 'Norwich')
+  ) +
+  theme(
+    legend.title = element_blank(),
+    legend.text = element_text(size = 6),
+    legend.position = "bottom"
+  ) +
+  labs(
+    title = "Predicted counts of Goals (Standard)",
+    caption = "Figure 7",
+    x = "Shots on Target",
+    y = "Goals (Standard)"
+  )
+```
+
+```{r}
+f8 <- plot(
+  ggpredict(
+    big5_glmm, 
+    terms = c("npxG_Expected", "Team [Dortmund, Lazio, Monaco, Atletico Madrid, Manchester City, Brighton and Hove Albion, Sheffield United, Burnley, Arminia, Norwich City]"), 
+    type = "random"
+  ), 
+  ci = FALSE
+) +
+  scale_color_manual(
+    values = c("#FDE100", "#87D8F7", "#E51B22", "#CB3524", "#6CABDD", "#0057B8", "#EE2737", "#6C1D45", "#004E95", "#00A650"),
+    labels = c('Dortmund', 'Lazio', 'Monaco', 'Atl. Madrid', 'Man City', 'Brighton', 'Sheffield Utd', 'Burnley', 'Arminia', 'Norwich')
+  ) +
+  theme(
+    legend.title = element_blank(),
+    legend.text = element_text(size = 6),
+    legend.position = "bottom"
+  ) +
+  labs(
+    title = "Predicted counts of Goals (Standard)",
+    caption = "Figure 8",
+    x = "xG (Non-Penalty)",
+    y = "Goals (Standard)"
+  )
+```
+
+```{r, fig.height = 5, fig.width = 8}
+f7 + f8 +
+  plot_annotation(title = "Random Effects")
+```
+
+```{r, eval = FALSE}
+plot(
+  ggpredict(
+    big5_glmm, 
+    terms = c("SoT_Standard", "Team [Bayern Munich, Watford]"), 
+    type = "random"
+  ), 
+  colors = c("#DC052D", "#FBEE23")
+)
+```
+
+Figure 7 provides a visual representation of the estimated number of standard goals scored in a match with respect to the number of shots on target taken in a match for the teams highlighted in Table 5 and Table 6. Figure 8 provides a visual representation of the estimated number of standard goals scored in a match with respect to the amount of non-penalty xG generated in a match for the teams highlighted in Table 5 and Table 6.
+
+It can be seen that for the teams with the highest random team intercepts, they were estimated to score more standard goals in a match than the teams with the lowest random team intercepts with respect to the number of shots on target taaken in a match. Each team has a similar slope and a unique intercept. These same patterns follow for the non-penalty xG plot as well. Overall, these results are expected and in line with the estimated random team intercepts from the model.
+
+Based on these results for the random effects, it appears that the model effectively accomplishes the second goal of this analysis as it can estimate the number of standard goals scored in a match based on the number of shots on target taken and the amount of non-penalty xG generated while individually accounting for the variation in standard goals scored in a match due to a specific team playing after accounting for the number of shots on target taken and the amount of non-penalty xG generated.
+
+Overall, the model accounted for the team-specific variation in standard goals scored in a match after accounting for the number of shots on target taken and the amount of non-penalty xG generated by estimating higher random team intercepts for higher quality teams which resulted in higher estimates of standard goals scored in a match and estimating lower random team intercepts for lower quality teams which resulted in lower estimates of standard goals scored in a match.
+
+## Conclusions
+
+The two main goals of this analysis were to find shot-specific variables that can better explain the number of goals scored in a match and to fit a model that was able to account for the team-specific variation in goal scoring after accounting for the previously identified shot-specific variables. The previous section showed that accounting for the quality of the shots taken throughout a match by using the number of shots on target and the amount of non-penalty xG generated as fixed effects in the model helped to better explain the number of standard goals scored in a match. Furthermore, the model estimated these shot-specific variables as having positive relationships with respect to the number of standard goals scored in a match. Previous sections also showed that there is significant variability in the rate at which teams score standard goals in a match and the model accounted for that team-specific variation with random team intercepts.
+
+There are other studies that could be done to further enhance this analysis. One aspect that could be further studied is fitting other models to better understand penalty goal scoring and/or own goal scoring and synthesizing the results of those models to be able to model all goal scoring activity in a match and not just standard goal scoring. Another aspect that could be studied is whether or not there is variability due to the opposing team in a match. This study would most likely require the collection of additional data so that there would be enough data for each match up being considered.
+
+In conclusion, it can be said that the model proposed in this analysis which examined the quality of a shot while accounting for team-specific variation was a simple and effective model for understanding the number of goals scored in a match. Even with this simple model model proving effective, it is quite probable that further improvements to this model could be made to continue to improve the understanding of the number of goals scored in a match.
+
+\newpage
+
+## References
+
+Hartig F (2022). *DHARMa: Residual Diagnostics for Hierarchical (Multi-Level / Mixed) Regression Models*. R package version 0.4.6, <https://CRAN.R-project.org/package=DHARMa>.
