@@ -1,4 +1,7 @@
 # goal-scoring
+
+Stat 637 Final Project
+
 Better Understanding Goal Scoring in Soccer Matches
 
 In soccer, the obvious main objective is to score more goals than the opponent. Perhaps just as
